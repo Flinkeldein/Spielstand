@@ -1,0 +1,14 @@
+{
+  "name": "Spielstand",
+  "short_name": "Spielstand",
+  "description": "Punkte für Kartenspiele aufschreiben",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f1ea",
+  "theme_color": "#1f6f5c",
+  "lang": "de",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
