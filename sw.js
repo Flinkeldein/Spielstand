@@ -1,5 +1,5 @@
 // Offline-Cache: Netzwerk zuerst, bei Fehler aus dem Cache.
-const CACHE = "spielstand-v1";
+const CACHE = "spielstand-v2";
 const FILES = ["./", "index.html", "css/style.css", "js/app.js", "js/games.js", "js/store.js", "manifest.webmanifest", "icons/icon.svg"];
 
 self.addEventListener("install", (e) => {
