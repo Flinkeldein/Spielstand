@@ -287,8 +287,8 @@ function viewGame(id) {
                 <td class="rn">${ri + 1}</td>
                 ${scores[ri]
                   .map((v, pi) => {
-                    const doubled = round.closer === pi && def.isDoubled && def.isDoubled(round, game);
-                    return `<td class="${round.closer === pi ? "closer" : ""}">${v}${doubled ? '<sup title="verdoppelt">×2</sup>' : ""}</td>`;
+                    const note = def.cellNote ? def.cellNote(round, pi, game) : "";
+                    return `<td class="${round.closer === pi ? "closer" : ""}">${v}${note}</td>`;
                   })
                   .join("")}
               </tr>`
@@ -302,13 +302,15 @@ function viewGame(id) {
           </tfoot>
         </table>
       </div>
-      ${game.rounds.length ? `<p class="muted small center">Runde antippen zum Bearbeiten${def.usesCloser ? " · ● = hat Runde beendet" : ""}</p>` : ""}
+      ${game.rounds.length ? `<p class="muted small center">Runde antippen zum Bearbeiten${def.usesCloser ? ` · ● = ${esc(def.closerLabel || "hat Runde beendet")}` : ""}${def.tableHint ? ` · ${esc(def.tableHint)}` : ""}</p>` : ""}
 
       <div class="actions">
         ${
           game.finished
             ? `<button class="btn" id="rematch">Neues Spiel, gleiche Spieler</button>`
-            : `<button class="btn primary big" id="addRound">+ Runde ${game.rounds.length + 1} eintragen</button>`
+            : `<button class="btn primary big" id="addRound">+ Runde ${game.rounds.length + 1} eintragen${
+                def.roundInfo && def.roundInfo(game.rounds.length, game) ? ` (${esc(def.roundInfo(game.rounds.length, game))})` : ""
+              }</button>`
         }
         <button class="btn danger-outline" id="delete">Spiel löschen</button>
       </div>
@@ -335,42 +337,68 @@ function viewRound(id, which) {
   const game = findGame(id);
   if (!game) return go("#/");
   const def = getGame(game.type);
+  const fields = def.fields || [{ key: "raw", label: "Punkte", signed: true }];
+  const multi = fields.length > 1;
+  const toggles = (def.roundToggles || []).filter((t) => !t.when || t.when(game));
   const isNew = which === "new";
   const index = isNew ? game.rounds.length : Number(which);
   const existing = isNew ? null : game.rounds[index];
   if (!isNew && !existing) return go(`#/game/${id}`);
 
-  const work = {
-    raw: existing ? existing.raw.map(String) : game.players.map(() => ""),
-    closer: existing ? existing.closer : null,
-  };
+  // Eingaben als Text, je Feld ein Array (ein Wert pro Spieler)
+  const work = { closer: existing ? existing.closer : null };
+  for (const f of fields) {
+    work[f.key] = game.players.map((_, i) => (existing && existing[f.key] ? String(existing[f.key][i] ?? "") : ""));
+  }
+  for (const t of toggles) work[t.key] = existing ? !!existing[t.key] : false;
+
   const before = totals(game);
   if (existing) {
     const s = def.scoreRound(existing, game);
     s.forEach((v, i) => (before[i] -= v));
   }
+  const info = def.roundInfo ? def.roundInfo(index, game) : "";
 
   app.innerHTML = `
-    ${header(`Runde ${index + 1}`, `#/game/${id}`)}
+    ${header(`Runde ${index + 1}${info ? " · " + info : ""}`, `#/game/${id}`)}
     <main>
       <form id="roundForm">
+        ${toggles
+          .map(
+            (t) => `
+          <label class="card setting toggle"><span>${esc(t.label)}${t.hint ? `<br><span class="muted small">${esc(t.hint)}</span>` : ""}</span>
+            <input type="checkbox" data-toggle="${t.key}" ${work[t.key] ? "checked" : ""}></label>`
+          )
+          .join("")}
         ${game.players
           .map(
             (p, i) => `
-          <div class="entry">
-            <label for="s${i}" class="pname">${esc(p)}<br><span class="muted small">bisher ${before[i]}</span></label>
-            <button type="button" class="icon-btn sign" data-sign="${i}" aria-label="Vorzeichen wechseln">±</button>
-            <input id="s${i}" data-i="${i}" class="num score" type="text" inputmode="numeric" pattern="-?[0-9]*"
-                   autocomplete="off" placeholder="0" value="${esc(work.raw[i])}" enterkeyhint="next">
+          <div class="entry ${multi ? "multi" : ""}">
+            <label for="s${i}-${fields[0].key}" class="pname">${esc(p)}<br><span class="muted small">bisher ${before[i]}</span></label>
+            ${fields
+              .map(
+                (f) => `
+              <span class="field" data-wrap="${i}-${f.key}">
+                ${multi ? `<span class="field-label muted small">${esc(f.label)}</span>` : ""}
+                <span class="field-row">
+                  ${f.signed ? `<button type="button" class="icon-btn sign" data-sign="${i}-${f.key}" aria-label="Vorzeichen wechseln">±</button>` : ""}
+                  <input id="s${i}-${f.key}" data-i="${i}" data-field="${f.key}" class="num score" type="text" inputmode="numeric"
+                         pattern="${f.signed ? "-?" : ""}[0-9]*" autocomplete="off" placeholder="0" aria-label="${esc(p)}: ${esc(f.label)}"
+                         value="${esc(work[f.key][i])}" enterkeyhint="next">
+                </span>
+              </span>`
+              )
+              .join("")}
             ${
               def.usesCloser
-                ? `<button type="button" class="closer-btn ${work.closer === i ? "on" : ""}" data-closer="${i}" title="Hat die Runde beendet">Beendet</button>`
+                ? `<button type="button" class="closer-btn ${work.closer === i ? "on" : ""}" data-closer="${i}" title="${esc(def.closerHint || "")}">${esc(def.closerLabel || "Beendet")}</button>`
                 : ""
             }
           </div>`
           )
           .join("")}
-        ${def.usesCloser ? `<p class="muted small">„Beendet“ = wer zuerst alle Karten aufgedeckt hat.</p>` : ""}
+        ${def.closerHint ? `<p class="muted small">${esc(def.closerHint)}</p>` : ""}
+        ${def.fieldsHint ? `<p class="muted small">${esc(def.fieldsHint)}</p>` : ""}
         <div id="preview" class="card preview"></div>
         <button class="btn primary big" type="submit">Speichern</button>
         ${!isNew ? `<button class="btn danger-outline" type="button" id="delRound">Runde löschen</button>` : ""}
@@ -379,43 +407,63 @@ function viewRound(id, which) {
 
   const inputs = [...app.querySelectorAll(".score")];
   const preview = app.querySelector("#preview");
+  const inputOf = (i, key) => app.querySelector(`#s${i}-${key}`);
 
   const parse = (v) => {
     const n = parseInt(String(v).replace(/[^\d-]/g, ""), 10);
     return Number.isFinite(n) ? n : 0;
   };
 
+  const buildRound = () => {
+    const round = { closer: work.closer };
+    for (const f of fields) round[f.key] = work[f.key].map(parse);
+    for (const t of toggles) round[t.key] = work[t.key];
+    return round;
+  };
+
+  // Bei Spielen, in denen „Raus“ automatisch 0 bedeutet, wird dessen Eingabe ausgeblendet
+  const syncCloserInputs = () => {
+    if (!def.closerScoresZero) return;
+    game.players.forEach((_, i) =>
+      fields.forEach((f) => app.querySelector(`[data-wrap="${i}-${f.key}"]`).classList.toggle("hidden", work.closer === i))
+    );
+  };
+
   const refresh = () => {
-    const round = { raw: work.raw.map(parse), closer: work.closer };
+    const round = buildRound();
     const res = def.scoreRound(round, game);
     preview.innerHTML = game.players
       .map((p, i) => {
-        const doubled = res[i] !== round.raw[i];
-        return `<div class="pv"><span>${esc(p)}</span><span>${res[i]}${doubled ? " <em>(×2)</em>" : ""} → <strong>${before[i] + res[i]}</strong></span></div>`;
+        const note = def.cellNote ? def.cellNote(round, i, game) : "";
+        return `<div class="pv"><span>${esc(p)}</span><span>${res[i] >= 0 && def.lowestWins === false ? "+" : ""}${res[i]}${note} → <strong>${before[i] + res[i]}</strong></span></div>`;
       })
       .join("");
   };
 
-  inputs.forEach((inp, i) => {
+  inputs.forEach((inp, n) => {
+    const i = +inp.dataset.i;
+    const key = inp.dataset.field;
+    const signed = fields.find((f) => f.key === key).signed;
     inp.oninput = () => {
-      inp.value = inp.value.replace(/[^\d-]/g, "").replace(/(?!^)-/g, "");
-      work.raw[i] = inp.value;
+      inp.value = signed ? inp.value.replace(/[^\d-]/g, "").replace(/(?!^)-/g, "") : inp.value.replace(/\D/g, "");
+      work[key][i] = inp.value;
       refresh();
     };
     inp.onkeydown = (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        if (inputs[i + 1]) inputs[i + 1].focus();
+        const next = inputs.slice(n + 1).find((x) => x.offsetParent !== null);
+        if (next) next.focus();
         else inp.blur();
       }
     };
   });
   app.querySelectorAll("[data-sign]").forEach((b) => {
     b.onclick = () => {
-      const i = +b.dataset.sign;
-      const inp = inputs[i];
+      const [i, key] = b.dataset.sign.split("-");
+      const inp = inputOf(i, key);
       inp.value = inp.value.startsWith("-") ? inp.value.slice(1) : "-" + inp.value;
-      work.raw[i] = inp.value;
+      work[key][+i] = inp.value;
       refresh();
       inp.focus();
     };
@@ -425,24 +473,37 @@ function viewRound(id, which) {
       const i = +b.dataset.closer;
       work.closer = work.closer === i ? null : i;
       app.querySelectorAll("[data-closer]").forEach((x) => x.classList.toggle("on", +x.dataset.closer === work.closer));
+      syncCloserInputs();
+      refresh();
+    };
+  });
+  app.querySelectorAll("[data-toggle]").forEach((inp) => {
+    inp.onchange = () => {
+      work[inp.dataset.toggle] = inp.checked;
       refresh();
     };
   });
 
   app.querySelector("#roundForm").onsubmit = (e) => {
     e.preventDefault();
-    const raw = work.raw.map(parse);
-    if (def.minRoundScore != null) {
-      const bad = raw.findIndex((v) => v < def.minRoundScore || v > def.maxRoundScore);
+    const round = buildRound();
+    for (const f of fields) {
+      if (f.min == null && f.max == null) continue;
+      const bad = round[f.key].findIndex(
+        (v, i) => !(def.closerScoresZero && i === round.closer) && ((f.min != null && v < f.min) || (f.max != null && v > f.max))
+      );
       if (bad >= 0) {
-        alert(`${game.players[bad]}: ${raw[bad]} ist bei ${def.name} nicht möglich (${def.minRoundScore} bis ${def.maxRoundScore}).`);
+        alert(`${game.players[bad]}: ${round[f.key][bad]} ist bei ${def.name} als ${f.label} nicht möglich (${f.min} bis ${f.max}).`);
         return;
       }
     }
-    if (work.raw.every((v) => v === "" || v === "-") && !confirm("Alle Felder sind leer. Trotzdem mit 0 Punkten speichern?")) return;
-    if (def.usesCloser && work.closer == null && !confirm("Niemand als „Beendet“ markiert. Trotzdem speichern?")) return;
+    const allEmpty = fields.every((f) => work[f.key].every((v, i) => v === "" || v === "-" || (def.closerScoresZero && i === work.closer)));
+    if (allEmpty && !confirm("Alle Felder sind leer. Trotzdem mit 0 Punkten speichern?")) return;
+    if (def.usesCloser && work.closer == null && !confirm(`Niemand als „${def.closerLabel || "Beendet"}“ markiert. Trotzdem speichern?`)) return;
+    const check = def.checkRound ? def.checkRound(round, game, index) : {};
+    if (check.error) return alert(check.error);
+    if (check.warn && !confirm(check.warn)) return;
 
-    const round = { raw, closer: work.closer };
     if (isNew) game.rounds.push(round);
     else game.rounds[index] = round;
     game.updatedAt = Date.now();
@@ -462,6 +523,7 @@ function viewRound(id, which) {
       go(`#/game/${id}`);
     };
 
+  syncCloserInputs();
   refresh();
   if (isNew) inputs[0]?.focus();
 }
